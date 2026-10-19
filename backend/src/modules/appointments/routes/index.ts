@@ -15,3 +15,49 @@ appointmentsRouter.post(
   appointmentsController.book,
 );
 appointmentsRouter.get('/mine', authenticate, requireRole('patient'), appointmentsController.listMine);
+
+// Reschedule an appointment atomically: claim new slot and release old one
+// (Phase 2, issue #55). Requires verified email.
+appointmentsRouter.post(
+  '/:id/reschedule',
+  authenticate,
+  requireRole('patient'),
+  requireVerifiedEmail,
+  appointmentsController.reschedule,
+);
+// Cancel an appointment (Phase 2, issue #56). Requires verified email.
+appointmentsRouter.post(
+  '/:id/cancel',
+  authenticate,
+  requireRole('patient'),
+  requireVerifiedEmail,
+  appointmentsController.cancel,
+);
+// Waitlist operations (Phase 2, issue #57): join, leave, list, accept offer
+appointmentsRouter.post(
+  '/waitlist/join',
+  authenticate,
+  requireRole('patient'),
+  requireVerifiedEmail,
+  appointmentsController.joinWaitlist,
+);
+appointmentsRouter.post(
+  '/waitlist/leave',
+  authenticate,
+  requireRole('patient'),
+  requireVerifiedEmail,
+  appointmentsController.leaveWaitlist,
+);
+appointmentsRouter.get(
+  '/waitlist/list',
+  authenticate,
+  requireRole('patient'),
+  appointmentsController.listWaitlist,
+);
+appointmentsRouter.post(
+  '/waitlist/accept',
+  authenticate,
+  requireRole('patient'),
+  requireVerifiedEmail,
+  appointmentsController.acceptWaitlistOffer,
+);

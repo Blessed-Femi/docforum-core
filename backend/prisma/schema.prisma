@@ -52,6 +52,7 @@ enum AppointmentStatus {
   scheduled
   completed
   cancelled
+  late_cancelled
   no_show
 }
 
@@ -88,6 +89,13 @@ enum FulfillmentStatus {
   rejected
 }
 
+enum WaitlistStatus {
+  pending
+  on_hold
+  accepted
+  expired
+}
+
 enum Urgency {
   routine
   urgent
@@ -98,40 +106,40 @@ enum Urgency {
 // =========================================================================
 
 model User {
-  id              String    @id @default(uuid())
-  email           String    @unique
-  phone           String?
-  passwordHash    String
-  role            Role
+  id                    String    @id @default(uuid())
+  email                 String    @unique
+  phone                 String?
+  passwordHash          String
+  role                  Role
   // Phase 8 (issue #34): null = never verified. Self-serve signup leaves
   // this null; existing rows were backfilled to `createdAt` in the
   // add_email_verification migration. Distinct from
   // DoctorProfile.verificationStatus, which is the separate, manual
   // admin verification of a doctor's credentials — do not conflate.
-  emailVerifiedAt DateTime?
+  emailVerifiedAt       DateTime?
   // Phase 8 (issue #39): null = active. Deactivating never deletes anything
   // — no clinical or payment record is keyed to this flag, and none of the
   // deactivation paths remove rows. Login, refresh and access tokens are all
   // refused while this is set.
-  deactivatedAt DateTime?
+  deactivatedAt         DateTime?
   // Phase 8 (issue #39): bumped when an account is deactivated/reactivated,
   // so access tokens minted before that moment stop working immediately
   // instead of living out their 15-minute TTL. There is still no general
   // refresh-token revocation list (issue #18) — this is the narrow "revoke
   // everything for one account" case that deactivation needs.
   sessionsInvalidatedAt DateTime?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 
   patientProfile  PatientProfile?
   doctorProfile   DoctorProfile?
   facilityProfile FacilityProfile?
 
   emailVerificationTokens EmailVerificationToken[]
-  adminInvitesSent AdminInvite[]
+  adminInvitesSent        AdminInvite[]
   // Phase 8 (issue #45): PHI read-access log rows this user wrote (as viewer).
   // Opposite of AccessLog.accessedByUser.
-  accessLogs AccessLog[]
+  accessLogs              AccessLog[]
 
   @@index([role])
 }
@@ -197,27 +205,27 @@ model LoginAttempt {
 }
 
 model PatientProfile {
-  id          String    @id @default(uuid())
-  userId      String    @unique
-  fullName    String
-  dateOfBirth DateTime?
+  id             String    @id @default(uuid())
+  userId         String    @unique
+  fullName       String
+  dateOfBirth    DateTime?
   // Nullable, no FK relation on purpose — the minor/dependent consent and
   // account-ownership model is an explicit open PRD question (§8.2.5), not
   // resolved here. Don't build on top of this field assuming it means
   // anything enforced yet.
   guardianUserId String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
-  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  appointments   Appointment[]
-  paymentIntents PaymentIntent[]
-  prescriptions  Prescription[]
-  labOrders      LabOrder[]
-  dataExports    PatientExport[]
-
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  appointments    Appointment[]
+  paymentIntents  PaymentIntent[]
+  prescriptions   Prescription[]
+  labOrders       LabOrder[]
+  dataExports     PatientExport[]
   // Phase 8 (issue #45): who viewed this patient's records.
-  accessLogs AccessLog[]
+  accessLogs      AccessLog[]
+  waitlistEntries WaitlistEntry[]
 }
 
 // Phase 8 (issue #40): right-of-access export jobs. One row per request;
@@ -292,6 +300,7 @@ model DoctorProfile {
   userId             String             @unique
   fullName           String
   verificationStatus VerificationStatus @default(pending)
+  timeZone           String // IANA time zone identifier, e.g. "Europe/London", "America/New_York"
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
 
@@ -301,6 +310,7 @@ model DoctorProfile {
   appointments      Appointment[]
   prescriptions     Prescription[]
   labOrders         LabOrder[]
+  waitlistEntries   WaitlistEntry[]
 
   @@index([verificationStatus])
 }
@@ -310,7 +320,8 @@ model Specialty {
   name String @unique
   slug String @unique
 
-  doctors DoctorSpecialty[]
+  doctors         DoctorSpecialty[]
+  waitlistEntries WaitlistEntry[]
 }
 
 model DoctorSpecialty {
@@ -342,12 +353,13 @@ model FacilityProfile {
 }
 
 model FacilityCapability {
-  id                String         @id @default(uuid())
+  waitlistEntries   WaitlistEntry[]
+  id                String          @id @default(uuid())
   facilityProfileId String
   capabilityType    CapabilityType
   // e.g. a lab test category, or a medication class — free text on purpose,
   // no controlled vocabulary decided yet (out of Phase 1 scope).
-  detail String?
+  detail            String?
 
   facilityProfile FacilityProfile @relation(fields: [facilityProfileId], references: [id], onDelete: Cascade)
 
@@ -355,13 +367,14 @@ model FacilityCapability {
 }
 
 model AvailabilitySlot {
-  id              String     @id @default(uuid())
+  id              String          @id @default(uuid())
+  waitlistEntries WaitlistEntry[]
   doctorProfileId String
-  status          SlotStatus @default(open)
+  status          SlotStatus      @default(open)
   startTime       DateTime
   endTime         DateTime
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
 
   doctorProfile DoctorProfile @relation(fields: [doctorProfileId], references: [id], onDelete: Cascade)
   appointment   Appointment?
@@ -436,23 +449,23 @@ model IntakeForm {
 }
 
 model Consultation {
-  id            String              @id @default(uuid())
-  appointmentId String              @unique
+  id            String               @id @default(uuid())
+  appointmentId String               @unique
   outcome       ConsultationOutcome?
   notes         String?
-  createdAt     DateTime            @default(now())
+  createdAt     DateTime             @default(now())
 
-  appointment  Appointment   @relation(fields: [appointmentId], references: [id])
+  appointment   Appointment    @relation(fields: [appointmentId], references: [id])
   prescriptions Prescription[]
   labOrders     LabOrder[]
 }
 
 model Referral {
-  id             String         @id @default(uuid())
-  status         ReferralStatus @default(pending)
-  snapshotNotes  String
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
+  id            String         @id @default(uuid())
+  status        ReferralStatus @default(pending)
+  snapshotNotes String
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
   // TODO: sourceConsultationId, referringDoctorId, targetSpecialtyId,
   // targetDoctorId (nullable), snapshotIntakeId, resultingAppointmentId (nullable)
   // IMPORTANT: snapshotNotes / snapshotIntakeId must be copies, not live
@@ -470,14 +483,14 @@ model Prescription {
   supersedesPrescriptionId String?
   createdAt                DateTime    @default(now())
 
-  consultation    Consultation   @relation(fields: [consultationId], references: [id])
-  patientProfile  PatientProfile @relation(fields: [patientProfileId], references: [id])
-  prescribingDoctor DoctorProfile @relation(fields: [prescribingDoctorId], references: [id])
-  facilityProfile  FacilityProfile @relation(fields: [facilityProfileId], references: [id])
-  supersedes      Prescription?  @relation("PrescriptionCorrections", fields: [supersedesPrescriptionId], references: [id])
-  correctedBy     Prescription?  @relation("PrescriptionCorrections")
-  items           PrescriptionItem[]
-  paymentIntent   PaymentIntent?
+  consultation      Consultation       @relation(fields: [consultationId], references: [id])
+  patientProfile    PatientProfile     @relation(fields: [patientProfileId], references: [id])
+  prescribingDoctor DoctorProfile      @relation(fields: [prescribingDoctorId], references: [id])
+  facilityProfile   FacilityProfile    @relation(fields: [facilityProfileId], references: [id])
+  supersedes        Prescription?      @relation("PrescriptionCorrections", fields: [supersedesPrescriptionId], references: [id])
+  correctedBy       Prescription?      @relation("PrescriptionCorrections")
+  items             PrescriptionItem[]
+  paymentIntent     PaymentIntent?
 
   @@unique([supersedesPrescriptionId])
   @@index([patientProfileId, createdAt])
@@ -498,27 +511,27 @@ model PrescriptionItem {
 }
 
 model LabOrder {
-  id                  String      @id @default(uuid())
-  consultationId      String
-  patientProfileId    String
-  orderingDoctorId    String
-  facilityProfileId   String
-  amountStroops       BigInt
-  testType            String
-  urgency             Urgency     @default(routine)
-  notes               String?
-  status              OrderStatus @default(issued)
+  id                   String      @id @default(uuid())
+  consultationId       String
+  patientProfileId     String
+  orderingDoctorId     String
+  facilityProfileId    String
+  amountStroops        BigInt
+  testType             String
+  urgency              Urgency     @default(routine)
+  notes                String?
+  status               OrderStatus @default(issued)
   supersedesLabOrderId String?
-  createdAt           DateTime    @default(now())
+  createdAt            DateTime    @default(now())
 
-  consultation   Consultation   @relation(fields: [consultationId], references: [id])
-  patientProfile PatientProfile @relation(fields: [patientProfileId], references: [id])
-  orderingDoctor DoctorProfile  @relation(fields: [orderingDoctorId], references: [id])
+  consultation    Consultation    @relation(fields: [consultationId], references: [id])
+  patientProfile  PatientProfile  @relation(fields: [patientProfileId], references: [id])
+  orderingDoctor  DoctorProfile   @relation(fields: [orderingDoctorId], references: [id])
   facilityProfile FacilityProfile @relation(fields: [facilityProfileId], references: [id])
-  supersedes     LabOrder?      @relation("LabOrderCorrections", fields: [supersedesLabOrderId], references: [id])
-  correctedBy    LabOrder?      @relation("LabOrderCorrections")
-  result         LabResult?
-  paymentIntent  PaymentIntent?
+  supersedes      LabOrder?       @relation("LabOrderCorrections", fields: [supersedesLabOrderId], references: [id])
+  correctedBy     LabOrder?       @relation("LabOrderCorrections")
+  result          LabResult?
+  paymentIntent   PaymentIntent?
 
   @@unique([supersedesLabOrderId])
   @@index([patientProfileId, createdAt])
@@ -550,12 +563,48 @@ model FulfillmentRecord {
   // into PrescriptionFulfillment / LabOrderFulfillment before implementation.
 }
 
+model WaitlistEntry {
+  id                  String   @id @default(uuid())
+  patientProfileId    String
+  doctorProfileId     String?
+  specialtyId         String?
+  status              String // pending | on_hold | accepted | expired
+  // Time window during which the patient is willing to accept a slot
+  earliestAcceptable  DateTime
+  latestAcceptable    DateTime
+  // Time-boxed hold: when a slot is offered, it's held for this duration
+  holdDurationMinutes Int
+  // Audit trail
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  patientProfile       PatientProfile      @relation(fields: [patientProfileId], references: [id], onDelete: Cascade)
+  doctorProfile        DoctorProfile?      @relation(fields: [doctorProfileId], references: [id], onDelete: SetNull)
+  specialty            Specialty?          @relation(fields: [specialtyId], references: [id], onDelete: SetNull)
+  facilityCapability   FacilityCapability? @relation(fields: [facilityCapabilityId], references: [id])
+  facilityCapabilityId String?
+  availabilitySlot     AvailabilitySlot?   @relation(fields: [availabilitySlotId], references: [id])
+  availabilitySlotId   String?
+
+  @@unique([patientProfileId, doctorProfileId, specialtyId])
+  @@index([status])
+  @@index([patientProfileId, status])
+}
+
+model WindowTime {
+  id    String   @id @default(uuid())
+  start DateTime
+  end   DateTime
+
+  @@unique([start, end])
+}
+
 model Notification {
-  id        String   @id @default(uuid())
+  id        String    @id @default(uuid())
   type      String
   payload   Json
   readAt    DateTime?
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
   // TODO: userId
 }
 
@@ -579,7 +628,6 @@ enum PaymentIntentStatus {
   failed
 }
 
-
 model PaymentIntent {
   id             String              @id @default(uuid())
   prescriptionId String?             @unique
@@ -590,7 +638,7 @@ model PaymentIntent {
   labOrder     LabOrder?     @relation(fields: [labOrderId], references: [id])
 
   patientProfileId String
-  patientProfile   PatientProfile @relation(fields: [patientProfileId], references: [id])
+  patientProfile   PatientProfile  @relation(fields: [patientProfileId], references: [id])
   facilityId       String
   facility         FacilityProfile @relation(fields: [facilityId], references: [id])
 
@@ -652,18 +700,18 @@ model EscrowEventCursor {
 }
 
 model EscrowChainEvent {
-  id               String                 @id @default(uuid())
-  eventId          String
-  contractId       String
-  ledger           Int
-  txHash           String?
-  escrowId         BigInt?
-  eventType        String
-  state            EscrowChainEventState  @default(pending)
-  paymentIntentId  String?
-  payload          Json?
-  detectedAt       DateTime               @default(now())
-  alertedAt        DateTime?
+  id              String                @id @default(uuid())
+  eventId         String
+  contractId      String
+  ledger          Int
+  txHash          String?
+  escrowId        BigInt?
+  eventType       String
+  state           EscrowChainEventState @default(pending)
+  paymentIntentId String?
+  payload         Json?
+  detectedAt      DateTime              @default(now())
+  alertedAt       DateTime?
 
   @@unique([contractId, eventId])
   @@index([state, detectedAt])
