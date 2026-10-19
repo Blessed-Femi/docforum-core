@@ -52,6 +52,7 @@ enum AppointmentStatus {
   scheduled
   completed
   cancelled
+  late_cancelled
   no_show
 }
 
@@ -86,6 +87,13 @@ enum FulfillmentStatus {
   in_progress
   fulfilled
   rejected
+}
+
+enum WaitlistStatus {
+  pending
+  on_hold
+  accepted
+  expired
 }
 
 enum Urgency {
@@ -184,6 +192,7 @@ model PatientProfile {
   appointments   Appointment[]
   paymentIntents PaymentIntent[]
   dataExports    PatientExport[]
+  waitlistEntries WaitlistEntry[]
 }
 
 // Phase 8 (issue #40): right-of-access export jobs. One row per request;
@@ -258,6 +267,7 @@ model DoctorProfile {
   userId             String             @unique
   fullName           String
   verificationStatus VerificationStatus @default(pending)
+  timeZone         String           // IANA time zone identifier, e.g. "Europe/London", "America/New_York"
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
 
@@ -265,6 +275,7 @@ model DoctorProfile {
   specialties       DoctorSpecialty[]
   availabilitySlots AvailabilitySlot[]
   appointments      Appointment[]
+  waitlistEntries   WaitlistEntry[]
 
   @@index([verificationStatus])
 }
@@ -274,7 +285,8 @@ model Specialty {
   name String @unique
   slug String @unique
 
-  doctors DoctorSpecialty[]
+  doctors          DoctorSpecialty[]
+  waitlistEntries  WaitlistEntry[]
 }
 
 model DoctorSpecialty {
@@ -433,6 +445,38 @@ model FulfillmentRecord {
   // NOTE: this polymorphic (orderType, orderId) pair is flagged in
   // ARCHITECTURE.md §6.1.3 as a design smell to revisit — may be split
   // into PrescriptionFulfillment / LabOrderFulfillment before implementation.
+}
+
+model WaitlistEntry {
+  id                String           @id @default(uuid())
+  patientProfileId  String
+  doctorProfileId   String?
+  specialtyId       String?
+  status            String           // pending | on_hold | accepted | expired
+  // Time window during which the patient is willing to accept a slot
+  earliestAcceptable DateTime
+  latestAcceptable DateTime
+  // Time-boxed hold: when a slot is offered, it's held for this duration
+  holdDurationMinutes Int
+  // Audit trail
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  patientProfile PatientProfile @relation(fields: [patientProfileId], references: [id], onDelete: Cascade)
+  doctorProfile  DoctorProfile?  @relation(fields: [doctorProfileId], references: [id], onDelete: SetNull)
+  specialty      Specialty?     @relation(fields: [specialtyId], references: [id], onDelete: SetNull)
+
+  @@unique([patientProfileId, doctorProfileId, specialtyId])
+  @@index([status])
+  @@index([patientProfileId, status])
+}
+
+model WindowTime {
+  id      String   @id @default(uuid())
+  start   DateTime
+  end     DateTime
+
+  @@unique([start, end])
 }
 
 model Notification {
