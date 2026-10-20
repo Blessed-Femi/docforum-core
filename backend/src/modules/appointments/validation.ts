@@ -36,3 +36,7 @@ export const leaveWaitlistSchema = z.object({
 export const acceptWaitlistSchema = z.object({
   entryId: z.string(),
 });
+
+export const updateStatusSchema = z.object({
+  status: z.enum(['completed', 'cancelled', 'no_show']),
+});
