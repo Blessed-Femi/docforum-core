@@ -16,48 +16,18 @@ appointmentsRouter.post(
 );
 appointmentsRouter.get('/mine', authenticate, requireRole('patient'), appointmentsController.listMine);
 
-// Reschedule an appointment atomically: claim new slot and release old one
-// (Phase 2, issue #55). Requires verified email.
-appointmentsRouter.post(
-  '/:id/reschedule',
+// Lifecycle (issue #3 + the cascade trigger for issue #67): only the
+// treating doctor moves an appointment through completed/cancelled/
+// no_show; the patient may cancel their own — nothing else.
+appointmentsRouter.patch(
+  '/:appointmentId/status',
   authenticate,
-  requireRole('patient'),
-  requireVerifiedEmail,
-  appointmentsController.reschedule,
+  requireRole('doctor'),
+  appointmentsController.updateStatus,
 );
-// Cancel an appointment (Phase 2, issue #56). Requires verified email.
-appointmentsRouter.post(
-  '/:id/cancel',
+appointmentsRouter.patch(
+  '/:appointmentId/cancel',
   authenticate,
   requireRole('patient'),
-  requireVerifiedEmail,
-  appointmentsController.cancel,
-);
-// Waitlist operations (Phase 2, issue #57): join, leave, list, accept offer
-appointmentsRouter.post(
-  '/waitlist/join',
-  authenticate,
-  requireRole('patient'),
-  requireVerifiedEmail,
-  appointmentsController.joinWaitlist,
-);
-appointmentsRouter.post(
-  '/waitlist/leave',
-  authenticate,
-  requireRole('patient'),
-  requireVerifiedEmail,
-  appointmentsController.leaveWaitlist,
-);
-appointmentsRouter.get(
-  '/waitlist/list',
-  authenticate,
-  requireRole('patient'),
-  appointmentsController.listWaitlist,
-);
-appointmentsRouter.post(
-  '/waitlist/accept',
-  authenticate,
-  requireRole('patient'),
-  requireVerifiedEmail,
-  appointmentsController.acceptWaitlistOffer,
+  appointmentsController.cancelMine,
 );
