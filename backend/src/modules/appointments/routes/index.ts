@@ -15,6 +15,7 @@ appointmentsRouter.post(
   appointmentsController.book,
 );
 appointmentsRouter.get('/mine', authenticate, requireRole('patient'), appointmentsController.listMine);
+appointmentsRouter.get('/doctor/today', authenticate, requireRole('doctor'), appointmentsController.listDoctorToday);
 
 // Reschedule an appointment atomically: claim new slot and release old one
 // (Phase 2, issue #55). Requires verified email.

@@ -71,6 +71,12 @@ export async function acceptWaitlistOffer(req: Request, res: Response) {
   res.status(201).json(appointment);
 }
 
+export async function listDoctorToday(req: Request, res: Response) {
+  if (!req.user) throw new HttpError(401, 'Authentication required.');
+  const appointments = await appointmentsService.listDoctorAppointmentsToday(req.user.id);
+  res.status(200).json(appointments);
+}
+
 export async function updateStatus(req: Request, res: Response) {
   if (!req.user) throw new HttpError(401, 'Authentication required.');
   const { status } = updateStatusSchema.parse(req.body);

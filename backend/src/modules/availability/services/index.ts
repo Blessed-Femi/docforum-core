@@ -1,7 +1,7 @@
 import { HttpError } from '../../../http-error';
 import * as availabilityRepo from '../repositories';
 import * as doctorsService from '../../doctors/services';
-import { fromZonedTime, toZonedTime } from 'date-fns-tz';
+import { buildSlotRanges } from '../slot-generation';
 
 export function listOpenSlots(doctorProfileId: string) {
   return availabilityRepo.findOpenSlots(doctorProfileId);
@@ -23,33 +23,26 @@ export interface GenerateSlotsInput {
 }
 
 export async function generateSlots(input: GenerateSlotsInput) {
-  const { doctorProfileId, date, startHour, endHour, slotLengthMinutes, timeZone } = input;
-
-  if (slotLengthMinutes <= 0) throw new HttpError(400, 'slotLengthMinutes must be positive.');
-  if (startHour < 0 || endHour > 24 || startHour >= endHour) {
-    throw new HttpError(400, 'startHour must be before endHour, both within 0-24.');
+  const { doctorProfileId } = input;
+  let proposedSlots: ReturnType<typeof buildSlotRanges>;
+  try {
+    proposedSlots = buildSlotRanges(input);
+  } catch (error) {
+    throw new HttpError(400, error instanceof Error ? error.message : 'Invalid slot-generation input.');
   }
+  if (proposedSlots.length === 0) return { created: 0 };
 
-  const tz = timeZone ?? 'UTC';
-  // Interpret the date as midnight in the doctor's timezone, then convert to UTC instants
-  const dayStartLocal = fromZonedTime(`${date}T00:00:00.000Z`, tz);
-  const dayStart = new Date(dayStartLocal.getTime());
-  if (Number.isNaN(dayStart.getTime())) throw new HttpError(400, 'date must be a valid ISO date.');
-
-  // Convert local wall-clock hours to UTC instants in the doctor's timezone
-  const rangeStart = new Date(dayStart.getTime() + startHour * 60 * 60 * 1000);
-  const rangeEnd = new Date(dayStart.getTime() + endHour * 60 * 60 * 1000);
-
-  const existing = await availabilityRepo.findExistingSlotRanges(doctorProfileId, rangeStart, rangeEnd);
-  const existingStarts = new Set(existing.map((slot) => slot.startTime.getTime()));
-
-  const rows: { doctorProfileId: string; startTime: Date; endTime: Date }[] = [];
-  const stepMs = slotLengthMinutes * 60 * 1000;
-  for (let start = rangeStart.getTime(); start + stepMs <= rangeEnd.getTime(); start += stepMs) {
-    if (existingStarts.has(start)) continue; // idempotent: skip slots already generated
-    // Convert the local start instant back to UTC for storage
-    const utcStart = toZonedTime(new Date(start), tz);
-    rows.push({ doctorProfileId, startTime: utcStart, endTime: new Date(utcStart.getTime() + stepMs) });
+  const existing = await availabilityRepo.findExistingSlotRanges(
+    doctorProfileId,
+    proposedSlots[0].startTime,
+    proposedSlots[proposedSlots.length - 1].endTime,
+  );
+  const existingStarts = existing.map((slot) => slot.startTime.getTime());
+  let rows: ReturnType<typeof buildSlotRanges>;
+  try {
+    rows = buildSlotRanges(input, existingStarts);
+  } catch (error) {
+    throw new HttpError(400, error instanceof Error ? error.message : 'Invalid slot-generation input.');
   }
 
   if (rows.length === 0) return { created: 0 };
