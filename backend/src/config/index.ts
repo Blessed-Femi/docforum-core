@@ -6,6 +6,13 @@ if (payoutPrivacyMode !== 'facility' && payoutPrivacyMode !== 'pooled') {
   throw new Error('PAYOUT_PRIVACY_MODE must be either "facility" or "pooled".');
 }
 
+/** A strictly positive number from an env var, else the default. A typo like
+ * `REFERRAL_PENDING_TTL_DAYS=0` must not silently expire every referral. */
+function positiveNumber(raw: string | undefined, fallback: number): number {
+  const value = Number(raw);
+  return raw !== undefined && raw !== '' && Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
 function requireEnv(name: string): string {
   const value = process.env[name];
   if (!value) throw new Error(`Missing required env var: ${name}`);
@@ -217,6 +224,14 @@ export const config = {
     graceHours: Number(process.env.ACCOUNT_PURGE_GRACE_HOURS ?? 24),
     intervalSeconds: Number(process.env.ACCOUNT_PURGE_INTERVAL_SECONDS ?? 6 * 60 * 60),
   },
+  // Referral expiry (Phase 3, issue #8). A referral still `pending` this
+  // long after it was created — or after it last returned to `pending` —
+  // is moved to the terminal `expired` state by an interval sweep
+  // (src/jobs/referral-expiry.ts). A v1 default, not a tuned value.
+  referrals: {
+    pendingTtlDays: positiveNumber(process.env.REFERRAL_PENDING_TTL_DAYS, 14),
+    expirySweepIntervalSeconds: positiveNumber(process.env.REFERRAL_EXPIRY_SWEEP_INTERVAL_SECONDS, 60 * 60),
+  },
   // Guardians and dependents (Phase 8, issue #42, docs/adr/0011). Guardian
   // access ends automatically when the dependent reaches this age (UTC
   // calendar date, checked at request time).
@@ -248,6 +263,10 @@ export const config = {
   adminInvites: {
     ttlHours: Number(process.env.ADMIN_INVITE_TTL_HOURS ?? 72),
     acceptUrl: process.env.ADMIN_INVITE_ACCEPT_URL ?? 'http://localhost:5173/accept-admin-invite',
+  },
+  orders: {
+    confirmationWindowHours: Number(process.env.ORDER_CONFIRMATION_WINDOW_HOURS ?? 72),
+    expiryIntervalSeconds: Number(process.env.ORDER_EXPIRY_INTERVAL_SECONDS ?? 300),
   },
   payments: {
     ...parsePaymentsConfig(process.env),
