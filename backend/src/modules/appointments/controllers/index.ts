@@ -1,6 +1,15 @@
 import type { Request, Response } from 'express';
 import * as appointmentsService from '../services';
-import { bookSlotSchema, listMineQuerySchema, updateStatusSchema } from '../validation';
+import * as patientsService from '../../patients/services';
+import {
+  acceptWaitlistSchema,
+  bookSlotSchema,
+  leaveWaitlistSchema,
+  listMineQuerySchema,
+  rescheduleSlotBodySchema,
+  updateStatusSchema,
+  waitlistJoinSchema,
+} from '../validation';
 import { HttpError } from '../../../http-error';
 import { auditActor } from '../../../middleware/request-id';
 import { getParam } from '../../../request-params';
