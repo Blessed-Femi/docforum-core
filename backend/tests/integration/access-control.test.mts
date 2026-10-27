@@ -42,6 +42,8 @@ type Prisma = typeof import('../../src/db/prisma-client.js').prisma;
 // ---------------------------------------------------------------------------
 const KNOWN_ROUTES = [
   'GET /health',
+  'GET /health/live',
+  'GET /health/ready',
   'POST /auth/signup',
   'POST /auth/login',
   'POST /auth/refresh',
@@ -96,6 +98,8 @@ interface MatrixRow {
 const ACCESS_MATRIX: MatrixRow[] = [
   // Health — public
   { method: 'GET', path: '/health', expected: { anon: 200, patient: 200, doctor: 200, facility: 200, admin: 200 } },
+  { method: 'GET', path: '/health/live', expected: { anon: 200, patient: 200, doctor: 200, facility: 200, admin: 200 } },
+  { method: 'GET', path: '/health/ready', expected: { anon: 200, patient: 200, doctor: 200, facility: 200, admin: 200 } },
 
   // Auth — public signup/login/refresh; logout needs CSRF token (403 without)
   // signup/login are tested in seedActors — direct assertions below use fresh emails
@@ -146,9 +150,9 @@ const ACCESS_MATRIX: MatrixRow[] = [
   { method: 'GET', path: '/admin/orders/disputes', expected: { anon: 401, patient: 403, doctor: 403, facility: 403, admin: 200 } },
   { method: 'POST', path: '/admin/orders/disputes/:id/resolve', expected: { anon: 401, patient: 403, doctor: 403, facility: 403, admin: 404 } },
 
-  // Payments — admin-triggered in v1; wallet-link is facility-only
+  // Payments — admin-triggered in v1; wallet-link is patient and facility (issue #78)
   { method: 'POST', path: '/payments/wallet-link', expected: { anon: 401, patient: 403, doctor: 403, facility: 400, admin: 403 } },
-  { method: 'GET', path: '/payments/wallet-link', expected: { anon: 401, patient: 403, doctor: 403, facility: 404, admin: 403 } },
+  { method: 'GET', path: '/payments/wallet-link', expected: { anon: 401, patient: 404, doctor: 403, facility: 404, admin: 403 } },
   { method: 'GET', path: '/payments/intents/:id', expected: { anon: 401, patient: 403, doctor: 403, facility: 403, admin: 404 } },
   { method: 'POST', path: '/payments/intents/:id/fund', expected: { anon: 401, patient: 403, doctor: 403, facility: 403, admin: 404 } },
   { method: 'POST', path: '/payments/intents/:id/release', expected: { anon: 401, patient: 403, doctor: 403, facility: 403, admin: 404 } },

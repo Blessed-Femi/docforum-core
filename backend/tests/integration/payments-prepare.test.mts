@@ -15,7 +15,7 @@ import { Keypair } from '@stellar/stellar-sdk';
 import { createOrderFixture } from './order-fixtures.mjs';
 
 const BACKEND_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const PORT = 5440;
+const PORT = 5462;
 const runId = Date.now();
 
 const NATIVE_SAC = 'CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC';
@@ -107,6 +107,8 @@ describe('prepare endpoint (issue #80)', () => {
     const dbModule = await import('../../src/db/prisma-client.js');
     prisma = dbModule.prisma;
     paymentsService = await import('../../src/modules/payments/services/index.js');
+    // Wallet funding is behind a feature flag (issue #132), off by default.
+    await prisma.featureFlag.update({ where: { key: 'payments.wallet_funding' }, data: { enabled: true } });
 
     paymentsService.setEscrowSdkForTests({
       Keypair,
@@ -132,8 +134,14 @@ describe('prepare endpoint (issue #80)', () => {
       await prisma.patientProfile.create({ data: { userId: patientUser.id, fullName: 'Prepare Patient' } })
     ).id;
     patientPublicKey = Keypair.random().publicKey();
-    await prisma.patientWalletLink.create({
-      data: { patientProfileId, stellarPublicKey: patientPublicKey, verifiedAt: new Date() },
+    await prisma.walletLink.create({
+      data: {
+        ownerType: 'patient',
+        ownerId: patientProfileId,
+        stellarPublicKey: patientPublicKey,
+        verificationMethod: 'sep10',
+        activeOwnerKey: `patient:${patientProfileId}`,
+      },
     });
 
     const otherUser = await prisma.user.create({
@@ -153,7 +161,13 @@ describe('prepare endpoint (issue #80)', () => {
       })
     ).id;
     await prisma.walletLink.create({
-      data: { facilityId, stellarPublicKey: Keypair.random().publicKey() },
+      data: {
+        ownerType: 'facility',
+        ownerId: facilityId,
+        stellarPublicKey: Keypair.random().publicKey(),
+        verificationMethod: 'sep10',
+        activeOwnerKey: `facility:${facilityId}`,
+      },
     });
 
     const unlinkedUser = await prisma.user.create({

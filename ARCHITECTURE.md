@@ -33,6 +33,7 @@ See `PRD.md` for product scope and `ARCHITECTURE_ESSENTIALS.md` for the quick-re
 | Realtime (messaging/notifications) | WebSocket gateway (or managed pub/sub, e.g. Pusher/Ably) behind an internal `notifications` interface | Swappable; not custom infra from day one. |
 | Video/voice (if/when needed) | Third-party embed (Twilio/Daily/Agora) behind an interface, not built in-house | PRD §8.3.1 — explicitly flagged as overengineering risk if built custom. |
 | File/result storage | Object storage (S3-compatible) for lab result attachments | Never store clinical files directly in Postgres rows. |
+| Email / SMS delivery | **Postmark** (transactional email) and **Twilio** (SMS), both behind the provider-agnostic `notifications` dispatch interface and the `email-dispatcher.ts` seam. Decided per `docs/adr/` (Phase 6, issue #17). | Transactional-only providers with no marketing-list coupling; swappable because business logic only ever calls the internal `Notification` dispatch interface, never a provider SDK. |
 | Field-level encryption | AES-256-GCM envelope encryption (`backend/src/utils/field-encryption.ts`, Phase 8 issue #46) for clinical free text (`Consultation.notes`, `Referral.snapshotNotes`) | Limits blast radius of a leaked DB dump / over-broad read replica — encryption at rest doesn't protect against those. Versioned key-id prefix enables rotation without rewriting every row. **Constraint: encrypted fields cannot be searched or indexed** — they're write-once/read-decrypt blobs. |
 | Background jobs | Simple queue (BullMQ on Redis) for reminders, order-expiry checks, notification delivery | Needed for FR-15/16 and the "orphaned order" hard question (PRD §8.1.3). |
 | Infra | Docker Compose for local dev; containerized deploy target TBD (not decided — see Open Questions in ROADMAP) | Keep infra decisions deferred until a real deploy target is chosen; don't overbuild CI/CD for a repo with no code yet. |
@@ -502,6 +503,34 @@ to the caller's own profile (resolved from the authenticated user, never
 from the request) and strips all viewer PII to a role — a deleted viewer
 surfaces as `deleted_user`.
 
+### 4.14 Feature flags (Phase 8, issue #132)
+
+```
+FeatureFlag
+  key            text  PK        -- dotted, lowercase: 'payments.wallet_funding'
+  description    text
+  enabled        bool            -- kill switch: false = off for everyone
+  rolloutPercent int 0..100      -- sticky hash bucket (see below)
+  allowRoles     Role[]          -- empty = no role restriction
+  allowUserIds   text[]          -- always on (while enabled), bypasses role + percent
+  createdAt, updatedAt
+```
+
+One row per flag in each environment's own database, so staging and production
+are independent by construction. Evaluation (`modules/flags/evaluate.ts`) is a
+pure function: off if `enabled` is false; on if the user id is allowlisted;
+off if `allowRoles` is non-empty and excludes the user's role; otherwise on
+when `sha256(key:userId)` bucket (0–99) is below `rolloutPercent`. The bucket is
+a hash, never random, so a user's answer is the same on every request and
+raising the percentage never turns anyone off. Evaluation never throws and
+defaults to off (unknown flag, malformed row, database down with nothing
+cached). Flags are cached in memory for `FEATURE_FLAG_CACHE_TTL_SECONDS`
+(default 15). Changes go only through `PATCH /admin/feature-flags/:key`, which
+writes a `feature_flag.created` / `feature_flag.updated` `AuditEvent` in the
+same transaction (counts and the percentage only — never the allowlisted ids).
+First user: `payments.wallet_funding` gates `POST /payments/intents/:id/prepare`
+(ADR 0005: wallet funding launches as an option), seeded off.
+
 ### 4.13 Payments (Phase 5.5 — ADR 0004 custodial v1, ADR 0005 non-custodial)
 ```
 PaymentIntent
@@ -602,5 +631,9 @@ T5, enforced as a curated config policy.
   see `docs/adr/0003-render-preview-deployment.md`. Explicitly not this
   decision: no secrets manager, no backups, disposable data, 30-day
   free-tier DB expiry.
+- Notification provider — **resolved (Phase 6, issue #17):** Postmark for
+  email and Twilio for SMS, behind the provider-agnostic `notifications`
+  interface (see §2). Provider SDK calls must stay inside the dispatch
+  adapter, never in business logic.
 - Video/voice provider — undecided, PRD OQ-1 must resolve first.
 - Multi-region / i18n — not designed for, not blocked either.

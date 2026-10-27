@@ -37,7 +37,7 @@ and issue links.
 **Why first:** everything else depends on real users existing and on the booking concurrency guarantee (ARCHITECTURE.md §5.1) being real, not aspirational.
 
 - [x] Flesh out `User`, `PatientProfile`, `DoctorProfile`, `FacilityProfile`, `Specialty`, `DoctorSpecialty`, `FacilityCapability` in `schema.prisma` with real fields/relations. Migrated: `backend/prisma/migrations/20260914110638_init/`.
-- [ ] Local dev DB via Docker Compose (`infra/docker`) — **file written, not exercised.** Verification tracked as [issue #27](https://github.com/DocForum/docforum-core/issues/27) (Trivial, 100 pts). No Docker in the environment this was built in, so the backend was developed and tested against a locally-installed Postgres (via the `embedded-postgres` devDependency — a prebuilt binary, not compiled) instead. The compose file matches `backend/.env.example`'s credentials but hasn't itself been run. See `infra/docker/README.md`.
+- [x] Local dev DB via Docker Compose (`infra/docker`) — verified and exercised ([issue #27](https://github.com/DocForum/docforum-core/issues/27), Trivial, 100 pts). Containers defined in `infra/docker/docker-compose.yml` (Postgres 16 + containerized backend), migrations run cleanly, endpoints verified (`/health`, `/specialties`, auth signup/login). Documented in `infra/docker/README.md` and main `README.md`.
 - [x] Auth module: signup/login, JWT access+refresh, role middleware. `POST /auth/signup` rejects `role: 'facility'`/`'admin'` server-side (PRD OQ-2), not just in docforum-web's UI. Refresh token travels as an httpOnly cookie — see `docs/api/README.md` for the local-dev-only cookie caveat (cross-origin `sameSite`/`secure` not verified end-to-end).
 - [x] Doctor verification status workflow (admin-gated, manual in v1 per PRD §6.1 FR-3). `PATCH /doctors/:id/verification`, admin-only.
 - [x] `AvailabilitySlot` model finalized **with the DB-level constraint/transaction strategy** that prevents double-booking (ARCHITECTURE.md §5.1 / §6.1.1 — this is the single highest-priority correctness item in the whole roadmap). **Resolved, not just implemented** — see the integration test below.
@@ -72,7 +72,7 @@ and issue links.
 **Status: Partially implemented (issue #76: facility-side fulfillment proof, patient confirm/dispute, unconfirmed order expiry, admin dispute queue implemented and tested).**
 - [ ] `Prescription` + `PrescriptionItem` models, **append-only** (issuance creates a row; corrections use `supersedes_prescription_id` — ARCHITECTURE.md §4.5, hard rule in ARCHITECTURE_ESSENTIALS.md). Tracked as [issue #9](https://github.com/DocForum/docforum-core/issues/9) (High, 200 pts), which also covers `LabOrder`/`LabResult` (same append-only rule).
 - [ ] `LabOrder` + `LabResult` models, same append-only rule — folded into issue #9 above.
-- [ ] Specialist UI: issue prescription/lab order from a consultation. Tracked as [issue #10](https://github.com/DocForum/docforum-core/issues/10) (Medium, 150 pts) — depends on #9.
+- [x] Specialist UI: issue prescription/lab order from a consultation. Tracked as [issue #10](https://github.com/DocForum/docforum-core/issues/10) (Medium, 150 pts) — depends on #9. **Backend done:** `POST /orders/consultations/:consultationId/{prescriptions,lab-orders}` go through the append-only issuance path, are limited to the consultation's treating doctor (verified profile), and refuse consultations whose appointment isn't `completed` (409) or an unknown/wrong-type facility (400). Tested in `backend/tests/integration/orders-issuance.test.mts`. The doctor screen is tracked in `docforum-web`.
 - [ ] Patient UI: view active/past orders. Tracked as [issue #11](https://github.com/DocForum/docforum-core/issues/11) (Medium, 150 pts) — depends on #9.
 - [x] Facility fulfillment proof & patient confirmation/dispute workflow. Tracked as issue #76. Facility fulfillment requires reference number and optional attachment. Patient confirm-receipt/dispute are mutually exclusive via DB conditional update. Derived `confirmedSignal` boolean. Idempotent expiry job for unconfirmed orders. Admin dispute queue and append-only resolution logs.
 
@@ -96,7 +96,7 @@ and issue links.
 - [x] Refund path for rejected/expired orders — `POST /payments/intents/:id/refund`, same admin-triggered caveat as release.
 - [ ] Idempotent escrow funding + on-chain reconcile job (`fundPaymentIntent` is check-then-act — docforum-escrow threat model §5). Tracked as [issue #24](https://github.com/DocForum/docforum-core/issues/24) (High, 200 pts).
 - [ ] ADR: releaser key custody — multisig, KMS, or per-period rotation (threat model T1/T2). Tracked as [issue #25](https://github.com/DocForum/docforum-core/issues/25) (Medium, 150 pts).
-- [ ] Checksum-validate facility wallet keys, not just regex. Tracked as [issue #26](https://github.com/DocForum/docforum-core/issues/26) (Trivial, 100 pts).
+- [x] Checksum-validate facility wallet keys, not just regex. Tracked as [issue #26](https://github.com/DocForum/docforum-core/issues/26) (Trivial, 100 pts) — validated via `StrKey.isValidEd25519PublicKey` in payments Zod schemas (`backend/src/modules/payments/validation.ts`), rejecting invalid CRC16 checksums, malformed prefixes and bad lengths.
 - [x] Patient payment history and facility payout ledger APIs, with ownership-scoped pagination, on-chain references, and BigInt-safe SQL totals. Tracked as [issue #90](https://github.com/DocForum/docforum-core/issues/90) — **implemented; `refundAfter` remains null until a payment model/contract version supports deadlines**.
 - [x] Nightly/manual testnet payment verification with fresh Friendbot-funded identities and deduplicated failure tracking. Tracked as [issue #91](https://github.com/DocForum/docforum-core/issues/91).
 - [x] Payout privacy prototype: testnet-only pooled payout support in the escrow funding path, with direct facility payouts as the default in production/local environments. Tracked as [issue #92](https://github.com/DocForum/docforum-core/issues/92).
@@ -106,10 +106,10 @@ and issue links.
 - [ ] Doc reconciliation: PRD §8.1.6 (facility fulfillment integrity) — not marked resolved; this phase proves the payment *mechanism* works, not the fulfillment-integrity question, which still needs real `FulfillmentRecord`/facility-matching (Phase 5) to actually address.
 
 ## Phase 6 — Notifications
-**Status: Not started. Provider decision scoped into issue #17; trigger-point build-out blocked by Phases 3 & 4 and deliberately left unscoped until those land.**
+**Status: In progress — provider decision made (see `docs/adr/0013-notification-provider.md`, issue #17). Trigger-point build-out still blocked by Phases 3 & 4 and deliberately left unscoped until those land.**
 - [ ] `Notification` model + dispatch interface (provider-agnostic, per ARCHITECTURE.md §2) — part of the trigger-point work, still blocked.
 - [ ] Trigger points per PRD FR-15/FR-16 (booking confirmed, referral created/accepted/declined, order ready, results available, new booking, lab results returned) — still blocked by Phases 3/4.
-- [ ] Pick and integrate a real provider (email/SMS) behind the interface — provider choice is currently undecided (ARCHITECTURE.md §8). Tracked as [issue #17](https://github.com/DocForum/docforum-core/issues/17) (Trivial, 100 pts) — a decision task, unblocked now.
+- [x] Pick and integrate a real provider (email/SMS) behind the interface — **decided:** email via Postmark (SMS deferred, no provider chosen); the adapter stays behind the provider-agnostic dispatch interface and no provider calls live in business logic. Tracked as [issue #17](https://github.com/DocForum/docforum-core/issues/17) (Trivial, 100 pts) — decision recorded in `docs/adr/0013-notification-provider.md`; integration itself is still to be built.
 
 ## Phase 7 — Frontend: core flows end-to-end
 **Status: Superseded.** This phase predates the 3-repo org split (see the org note at the top of this file) — all frontend work described below is actually tracked in `docforum-web`'s own `ROADMAP.md` (Phases W2–W5, issues opened there). Left in place as a historical record rather than deleted, but no issues are or will be opened against it here.
@@ -132,10 +132,11 @@ and issue links.
 - [ ] Account deletion with clinical-record retention: `DELETE /patients/me` (password re-confirmation, throttled) anonymises the identity in place and keeps appointments + payment intents intact; `PatientProfile.userId` FK CASCADE → RESTRICT (migration); interval purge of record-free tombstones (`src/jobs/account-purge.ts`, holds in `src/retention-holds.ts`). Decisions in `docs/adr/0010` — the **legal retention period for clinical/order/payment records stays an open decision** (kept indefinitely until set). Tracked as [issue #41](https://github.com/DocForum/docforum-core/issues/41) (High, 200 pts) — **in review**, branch `feat/41-account-deletion-retention`. Follow-up when #40 also merges: delete a deleted patient's `PatientExport` rows inside the anonymisation transaction (ADR 0010 table).
 - [ ] Guardian and dependent accounts: booking on behalf of a minor. Dependents are guardian-owned `PatientProfile`s with no login, linked through a real `Guardianship` relation that replaces the unenforced `guardianUserId` string (migration refuses to run over legacy values); `POST`/`GET /patients/me/dependents` (create-only — no linking of existing profiles); `patientProfileId` on `POST /appointments` (and `GET /appointments/mine`) authorised in the service layer before the unchanged booking transaction; access ends automatically at `AGE_OF_MAJORITY_YEARS` (default 18). Decisions in `docs/adr/0011`; PRD §8.2.5 marked resolved/re-scoped. Tracked as [issue #42](https://github.com/DocForum/docforum-core/issues/42) (High, 200 pts) — **in review**, branch `feat/42-guardian-dependent-accounts`. Follow-ups: majority account-claim flow, guardian/admin revoke endpoints, guardianship verification beyond self-assertion.
 - [ ] JWT refresh revocation list (ARCHITECTURE.md §6.1.4). Tracked as [issue #18](https://github.com/DocForum/docforum-core/issues/18) (Medium, 150 pts) — unblocked now, operates on Phase 1's auth module.
-- [ ] Held-slot TTL/release job (ARCHITECTURE.md §6.2.1). Tracked as [issue #19](https://github.com/DocForum/docforum-core/issues/19) (Medium, 150 pts) — unblocked now, operates on Phase 1's `AvailabilitySlot`.
+- [x] Held-slot TTL/release job (ARCHITECTURE.md §6.2.1). Tracked as [issue #19](https://github.com/DocForum/docforum-core/issues/19) (Medium, 150 pts) — **investigated, not applicable as currently designed.** Phase 1's `claimOpenSlot` claims a slot directly via a single conditional `UPDATE ... WHERE status = 'open'` inside the booking transaction (proven by `backend/tests/integration/booking.test.mts`: 8 concurrent attempts, exactly 1 wins) — there is no intermediate `held` status, so an abandoned hold cannot exist and there is nothing for a TTL job to release. No hold state was introduced to give this issue something to do. Revisit if a multi-step booking flow (e.g. reserving a slot while a patient fills out Phase 2 intake) introduces a `held` state; that flow would need a `heldAt`/`holdExpiresAt` column plus a sweep job, and this issue should be reopened then.
 - [x] Access-control test suite: who may read intake, consultation and payment data. Integration tests (`tests/integration/access-control.test.mts`) establishing the test harness and access-control patterns for the three PHI data categories; intake/consultation test cases are scaffolded as placeholders until Phase 2/3 routes exist, payment-intent access cases exercise the live admin-gated routes. Tracked as [issue #44](https://github.com/DocForum/docforum-core/issues/44) — **Done**.
 - [ ] Privacy access-control audit: confirm intake/consultation notes are visible only per PRD §7 (patient, treating doctor(s) in-thread, fulfilling facility for that specific order only) — write tests, not just code review. Still blocked — meaningfully auditable only once Phase 3/4/5 access paths exist. **One Phase 3 access path is now worth auditing (`GET /consultations/:id` — treating doctor + that appointment's patient only, and referral snapshot exposure on `GET /referrals/mine` / `/created`), but intake and orders remain unbuilt, so the audit as scoped stays blocked.** Not yet scoped into an issue.
 - [ ] Decide and document what's explicitly out of scope for v1 launch vs. genuinely blocking (e.g., drug-interaction checking, PRD §8.2.8 — needs an explicit go/no-go, not silence). Tracked as [issue #20](https://github.com/DocForum/docforum-core/issues/20) (Trivial, 100 pts) — a decision task, unblocked now.
+- [x] Feature flags for staged rollouts (DB-backed, per environment and per user cohort). Tracked as [issue #132](https://github.com/DocForum/docforum-core/issues/132) (High, 200 pts) — **Done:** `FeatureFlag` table + `modules/flags` (boolean and sticky hash-percentage flags, role and user-id targeting, in-memory cache with a short TTL, evaluation that never throws and defaults to off), `GET /admin/feature-flags` and `PATCH /admin/feature-flags/:key` with a `feature_flag.*` audit event per change, `GET /me/flags` for the frontend, and the wallet payment mode (`payments.wallet_funding`, seeded off) as the first flag user.
 
 ## Phase 9 — Deploy & CI
 **Status: In progress. Structured JSON logging (request IDs + PHI redaction) landed; load tests (k6) for search, slot listing and booking contention added; automated Postgres backups with a tested restore drill are now implemented (issue #107). A Render free-tier preview exists — see note. Production deploy still Not started. Remaining items scoped into issues #21–#22.**
@@ -148,6 +149,7 @@ and issue links.
 - [ ] Production environment + secrets management. Blocked on issue #22's decision landing first — not yet scoped into its own issue.
 - [x] **Automated Postgres backups with a tested restore drill** — `scripts/backup-postgres.sh` takes an encrypted logical backup (`pg_dump --format=custom` piped through `gpg --symmetric`, so the plaintext dump never touches disk) with a retention window; `scripts/restore-drill.sh` restores the latest backup into a scratch database with explicit confirmation and name guards (the target must end in `_drill`/`_scratch` and must not be the source database), then runs integrity checks (row counts, `_prisma_migrations`, a sample booking query). `.github/workflows/backup-restore-drill.yml` runs the round-trip daily (and on demand) against a seeded throwaway Postgres service. It does not touch the Render preview database yet, because there's no production target (see the deployment decision above). Design and RPO/RTO notes are in `docs/adr/0007-postgres-backups-and-restore-drill.md` and `infra/backup/README.md`. Tracked as [issue #107](https://github.com/DocForum/docforum-core/issues/107) — **Done**.
 - [x] Docs site deployed — `docs/site/` (VitePress) via `.github/workflows/deploy-docs.yml`, live at https://docforum.github.io/docforum-core/. Unrelated to the production-deploy decision above; this is a static site with no backend of its own.
+- [x] Cross-repo docs-site rebuild ([issue #29](https://github.com/DocForum/docforum-core/issues/29)): `.github/workflows/deploy-docs.yml` accepts `repository_dispatch` (`upstream-docs-updated`, `docs-sync`) from sibling repositories (`docforum-web`, `docforum-escrow`); token setup and dispatch workflow documented in `docs/site/README.md`.
 - [x] **PR conflict notifier** — `.github/workflows/pr-conflict-notifier.yml` + `.github/scripts/pr-conflict-notifier.cjs`. On every push to `main` (and every 3h) it labels open PRs that conflict with `main` as `needs-rebase` and @mentions the author once per push with rebase steps; the label clears itself when the conflict is resolved. Runs from `main` only and never checks out PR code.
 - [x] Structured JSON logging with request IDs and automatic PHI redaction. A `pino` logger (`backend/src/logger.ts`) with per-environment level (`LOG_LEVEL`, default `silent` under `NODE_ENV=test`), a request-scoped child logger carrying a request id (incoming `X-Request-Id` accepted or one generated, echoed on the response), and a redaction config covering auth headers, cookies, passwords, tokens and a list of PHI field paths. A custom `BigInt`-safe serialiser so `BigInt` values (payment amounts) log instead of crashing. The error handler routes through the request-scoped logger — stacks server-side, safe envelope to the client. Redaction unit tests assert each configured path is redacted. Still open (follow-up scope, not blocking): the remaining `console.*` call sites in `src/` (jobs, auth, users, audit) are not yet converted, and the `no-console` lint/grep gate described in the original plan is not implemented. Closes [issue #30](https://github.com/DocForum/docforum-core/issues/30) (High, 200 pts).
 - [x] **Load tests (k6)** — `backend/tests/load/` (`search.js`, `slots.js`, `booking-contention.js`), `backend/scripts/seed-load-test.mjs` (thousands of doctors + slots), and `.github/workflows/load-tests.yml` (manual/nightly, never against the shared Render preview). Thresholds enforce p95 latency on read paths and zero double-bookings; the contention scenario asserts correctness from the database afterwards (exactly one booking per slot), not just response codes. First results committed in `backend/tests/load/REPORT.md`.
@@ -378,11 +380,42 @@ and issue links.
   sponsorship. Custodial v1 stays as a fallback. Status: Proposed, not
   yet Accepted. Added to the docs site.
 - 2026-10-09 — Opened issue #32: upgrade to escrow SDK 0.3.0 and the
-  current testnet contract.
-- 2026-10-15 — Started Phase 8's auth-hardening work, scoped as issues
-  #34 (email verification), #35 (login brute-force throttling), #37 (CSRF
-  for the cookie-authenticated endpoints + per-environment CORS allowlist)
-  and #39 (admin account lifecycle). All four are independent of Phases
+  current testnet contract.- 2026-10-16 — Implemented issue #77 (SEP-10 Stellar Web Authentication server, Phase 5.5 / ADR 0005 step 4): `GET
+  /payments/sep10/challenge` builds a server-signed challenge (SDK
+  helper — Manage Data nonce, 5-minute time bounds, home domain +
+  web_auth_domain) and records the issuance binding; `POST
+  /payments/sep10/verify` walks the full SEP-10 server verification
+  list (structure, time bounds, server signature, client signatures
+  with multisig weight thresholds loaded from Horizon, and the
+  spec's master-key rule for unfunded accounts), then consumes the
+  nonce with ONE conditional UPDATE so concurrent replays can't both
+  succeed — same DB-level pattern as booking. New `Sep10Challenge`
+  model (unique nonce, userId, account, expiry) with a migration; a
+  dedicated `SEP10_SIGNING_SECRET` (never the payer/releaser keys,
+  validated at startup, never logged). Horizon is behind an injectable
+  seam so the 15 unit + 18 integration tests run with zero network.
+  Docs updated: ARCHITECTURE §4.10, essentials data-model map,
+  docs/api/README.md (endpoints + errors + unfunded behaviour).
+- 2026-10-16 — Implemented issue #78 (verified wallet links, stacked on
+  #77's branch): `WalletLink` generalized from facility-only/typed-in to
+  an owner (patient | facility) with `verificationMethod` /
+  `verifiedAt` / `replacedAt`, one active link per owner enforced by a
+  DB unique sentinel (Prisma can't express a partial index — noted in
+  the schema), and the migration backfills existing facility rows as
+  `unverified_legacy` (proven by a real migration test that inserts an
+  old-shape row first). `POST /payments/wallet-link` now takes only a
+  signed SEP-10 challenge (strict body — a raw address is a 400) and
+  creates the link inside the same transaction that consumes the nonce;
+  the only `sep10`-row writer is that flow. Patient link responses
+  carry ADR 0005's on-chain privacy notice verbatim (unit-tested
+  against the ADR file). Funding refuses unverified legacy links after
+  `WALLET_LINK_UNVERIFIED_FUNDING_CUTOFF` (default 2027-01-01,
+  startup-validated, `409 WALLET_LINK_UNVERIFIED`) and snapshots
+  `PaymentIntent.fundedWalletAddress` so re-linking can't rewrite an
+  escrow's payee. 8 unit + 12 integration tests (fake Horizon + fake
+  escrow SDK — no network). ADR 0005 unchanged (no factual conflict).
+- 2026-10-15 — Started Phase 8's auth-hardening work, scoped as issues #34 (email verification), #35 (login brute-force throttling), #37 (CSRF
+  for the cookie-authenticated endpoints + per-environment CORS allowlist) and #39 (admin account lifecycle). All four are independent of Phases
   3–7 and of each other. #34 merged as PR #137: `User.emailVerifiedAt` +
   a hashed/expiring/single-use `EmailVerificationToken` table (backfilled
   as verified for existing rows), `POST /auth/verify-email`,
@@ -540,3 +573,296 @@ and issue links.
   payouts as the default in production and local environments, with the
   configuration controlled by `PAYOUT_PRIVACY_MODE` and
   `PAYOUT_PRIVACY_POOL_ADDRESS`.
+- 2026-10-22 — Closed issue #19 (held-slot TTL/release job) as **not applicable as currently designed**, per the issue's own allowance for that outcome. Investigation: Phase 1's `claimOpenSlot` claims a slot directly with a conditional `UPDATE` inside the booking transaction and has no intermediate `held` status, so there is no abandoned-hold risk to bound — confirmed against `backend/tests/integration/booking.test.mts` (8 concurrent attempts, exactly 1 succeeds) and the absence of any `held`/`holdExpiresAt` field in `schema.prisma`. No hold state was introduced just to have something to release. Documented in the Phase 8 checklist; revisit if a multi-step booking flow (e.g. reserving a slot during Phase 2 intake) introduces a hold.
+- 2026-10-22 — Fixed the syntax error in `backend/src/modules/availability/repositories/index.ts` (TS1110, "Type expected" at line 31) that failed the local syntax check before push. The malformed type annotation in the repository's export was corrected in place; no other identifiers, exports, or formatting in that file were touched, and the held-slot investigation above is unchanged.
+- 2026-10-20 — Contributing: changelog entries now go in `changelog.d/` (one new file per
+  PR) instead of being appended to this section, which used to put most open
+  PRs into merge conflict on every merge. Maintainers fold them in with
+  `node scripts/fold-changelog.mjs`. Also dropped the "Last updated" line,
+  made the `docs/api/README.md` intro phase-agnostic, and documented the
+  "edit only your own lines" rule in `AGENTS.md`, `CLAUDE.md` and
+  `CONTRIBUTING.md`. The conflict notifier now points authors at
+  `changelog.d/`.
+- 2026-10-20 — Bumped `follow-redirects` 1.16.0 → 1.16.1 in `backend/package-lock.json`
+  (lockfile only; it comes in through `axios`, which allows `^1.15.x`). This
+  fixes GHSA-8r9p-f939-6h3c (high: credential headers can leak on redirect),
+  published 2026-10-20, which made the `audit:prod` CI gate fail on every PR.
+  No code changes.
+- 2026-10-21 — Phase 9: exercise slot-generation invariants and appointment/payment state
+  transitions with fixed-seed property tests, plus a larger nightly run
+  ([issue #120](https://github.com/DocForum/docforum-core/issues/120)).
+- 2026-10-21 — Phase 2: add the specialty catalog and doctor-owned specialty assignment,
+  plus a verified-only paginated doctor directory with trigram matching for
+  names and specialties ([issues #23](https://github.com/DocForum/docforum-core/issues/23)
+  and [#128](https://github.com/DocForum/docforum-core/issues/128)).
+- 2026-10-21 — Phase 9: added user locale preference, request and recipient locale resolution, ICU-formatted coded errors and password-reset notifications, English/French message catalogs, and a CI key-parity check ([issue #133](https://github.com/DocForum/docforum-core/issues/133)). Existing uncatalogued server messages still use their English fallback.
+- 2026-10-21 — Phase 2 (issue #4): an appointment's consultation can be closed exactly
+  once. `Consultation` is one-to-one with its `Appointment`
+  (`Consultation.appointmentId` UNIQUE, `docs/adr/0009`), so "closed once" is
+  a database constraint (`P2002` → `409`) rather than an app-level
+  read-then-write check. All three writers — `POST /consultations`,
+  `POST /appointments/:appointmentId/consultation`, and the orders flow's
+  consultation step — now go through one service
+  (`consultationsService.createConsultation`), so note encryption
+  (AES-256-GCM, issue #46), the own-`completed`-appointment rule and the
+  single `consultation.closed` audit event apply to every address.
+  `outcome` stays nullable in the schema (a record can exist before
+  sign-off); the close route requires it at the boundary. Integration test:
+  `backend/tests/integration/consultation.test.mts`.
+- 2026-10-21 — Phase 2: added a doctor-scoped `GET /appointments/doctor/today` view over scheduled appointments for the current server-local day ([issue #3](https://github.com/DocForum/docforum-core/issues/3)). Existing lifecycle transitions and referral cascades remain unchanged.
+- 2026-10-21 — Phase 8: account deletion with clinical-record retention
+  ([issue #41](https://github.com/DocForum/docforum-core/issues/41)), with ADR
+  0010's per-model retention table. `DELETE /patients/me` anonymises in place
+  rather than cascading: `User.deletedAt` + `PatientProfile.anonymizedAt`,
+  tombstoned email (frees the address for a new signup), unusable password,
+  cleared verification; appointments and payment intents are untouched and keep
+  their FK. The migration flips `PatientProfile.userId` from CASCADE to
+  RESTRICT (the only FK changed — inventory in the ADR). An interval purge
+  removes only tombstones no module holds records for. Found while testing:
+  Postgres reports RESTRICT as SQLSTATE 23001, which Prisma surfaces as an
+  unknown error rather than P2003 — recorded in ARCHITECTURE.md §6.1.6. The
+  legal retention period for clinical records is explicitly left open (an open
+  decision in the ADR), not invented.
+  Rebased onto `main` after #40 (patient export), #45 (access log) and the
+  Phase 3/4 referral and order models landed: the purge now also holds back for
+  prescriptions, lab orders, referrals and access-log rows (each through its
+  own module's service), and a patient's exports are deleted inside the
+  anonymisation transaction, as the ADR's wiring note required of whichever of
+  #40/#41 merged second. ADR renumbered 0007 → 0010 (0007 is now the backups
+  ADR).
+- 2026-10-21 — Issue #42 (guardian and dependent accounts) opened as a PR
+  with ADR 0011: dependents are guardian-owned patient profiles
+  (`PatientProfile.userId` now nullable, a CHECK requires a DOB when it's
+  null) linked by a new `Guardianship` table (real FKs, unique per pair,
+  `revokedAt`, never deleted). The bare `guardianUserId` string is dropped;
+  the migration aborts if any row still holds a value instead of silently
+  discarding it (tested both ways). `POST`/`GET /patients/me/dependents` are
+  create-only; `POST /appointments` takes `patientProfileId`, authorised by
+  `patientsService.resolveActingProfile` before the booking transaction,
+  which is otherwise byte-for-byte unchanged — re-proven with a concurrent
+  race that includes a guardian booking. Guardian access ends at the age of
+  majority (default 18). PRD §8.2.5 marked resolved/re-scoped.
+  Reconciled with #41 (account deletion), which merged first:
+  `PatientProfile.userId` is nullable but keeps #41's `ON DELETE RESTRICT`;
+  deleting a guardian's account revokes their guardianships in the same
+  transaction (dependents and their records untouched), a deleted account
+  acts for no one through `resolveActingProfile`, and the account purge holds
+  a guardian's tombstone while guardianship rows name it (hold
+  `guardianships`). ADR 0010's retention table and ADR 0011 updated.
+- 2026-10-21 — Phase 3: specialty-only referral routing decided and implemented
+  ([issue #6](https://github.com/DocForum/docforum-core/issues/6)).
+  [`docs/adr/0008-referral-routing-without-target-doctor.md`](docs/adr/0008-referral-routing-without-target-doctor.md)
+  closes the ARCHITECTURE.md §6.1.2 gap: a referral may name a doctor *or* a
+  specialty, and a specialty-only target is resolved **at creation** to the
+  least-loaded eligible doctor (verified, holds the specialty, not the
+  referring doctor, active account; fewest `pending`+`accepted` referrals,
+  ties by doctor id). `Referral.targetDoctorId` stays NOT NULL, so nothing
+  is ever created unassigned; zero eligible doctors is a `422
+  REFERRAL_NO_ELIGIBLE_TARGET` and writes no row. No schema or migration
+  change — the new surface is the optional `targetDoctorId` in the existing
+  referral create/batch bodies and the `targetDoctorId` the response now
+  carries for a routed referral.
+  Not built, deliberately: PRD §8.2.2's patient-facing "waiting for a
+  specialist" state — it requires a target-less referral, which the ADR
+  rejects. Issue #8's time-based expiry is still the answer for a routed
+  referral whose doctor never offers a slot.
+  Note for the next contributor: this change also restores the referrals
+  table in `docs/api/README.md`, which an earlier commit had truncated
+  mid-row (along with the payments/orders/audit sections after it — still
+  missing, and not restored here).
+- 2026-10-21 — Phase 5.5: multi-asset payment intents and the patient-signed prepare half
+  of ADR 0005 ([issue #79](https://github.com/DocForum/docforum-core/issues/79),
+  [issue #80](https://github.com/DocForum/docforum-core/issues/80)).
+  `PaymentIntent.amountStroops` is renamed to the token-agnostic `amount`
+  (a column rename in the migration, so existing values are preserved), and
+  each intent now records an allowlisted `assetCode` + `tokenContractId`
+  (native XLM + USDC on testnet, configured per environment via
+  `PAYMENT_ASSETS`). Funding and prepare check the payee's trustline before
+  any SDK call, and facility totals are grouped per asset rather than summed
+  across them. `POST /payments/intents/:id/prepare` builds and simulates the
+  patient-as-payer `create_escrow`, stores the unsigned XDR/hash and moves the
+  intent `created -> awaiting_signature`; an interval job expires stale
+  prepared transactions back to `created`. The real SDK call still returns
+  `503 ESCROW_SDK_PREPARE_UNSUPPORTED` until `@docforum/escrow-sdk` 0.3.0
+  ([issue #32](https://github.com/DocForum/docforum-core/issues/32)) ships;
+  submit/fee-bump is not part of #80.
+- 2026-10-21 — Malware scan: `.vue`, `.svelte`, `.astro`, `.less`, `.sass`, `.go`,
+  `go.mod` and `go.sum` files are now scanned as code. Before this, a Vue
+  single-file component was flagged HIGH as "disguised code" (JavaScript
+  inside a file with a non-code extension), which wrongly blocked
+  docforum-core #207. The same line rules still apply to these files.
+- 2026-10-21 — Malware scan: closed three gaps found in the malicious docforum-web #137,
+  which only had three of its nine problems flagged. Code pushed off-screen by
+  leading whitespace is now flagged (`api.js` hid its payload behind 315 tabs).
+  A `package.json` script such as `dev` or `build` that now also runs
+  `node <file>` (or bun, deno, sh, bash, python) alongside its original command
+  is flagged as `script-hijack`. The `global['!'] = …` marker of the loader used
+  in escrow #163 and web #137 is flagged as `known-payload`. The whole-line
+  heuristics no longer stop the per-line rules from running on the same file.
+- 2026-10-21 — Malware scan: TLA+ specifications (`.tla`) are now scanned as text, like
+  other source files. Before this, a TLA+ spec was flagged HIGH as "disguised
+  code", which wrongly blocked docforum-escrow #225. Every line rule still
+  applies to `.tla` files.
+- 2026-10-22 — Phase 5 prerequisite: resolved the polymorphic `FulfillmentRecord` design smell
+  flagged in ARCHITECTURE.md §6.1.3 and §6.3.1
+  ([issue #13](https://github.com/DocForum/docforum-core/issues/13)) with
+  `docs/adr/0012-fulfillment-record-typed-order-fks.md`. Decision: keep **one**
+  table, drop the polymorphism — the Phase 0 `(order_type, order_id)` TEXT pair is
+  replaced by real `prescription_id` / `lab_order_id` FKs (each `UNIQUE`, a
+  PostgreSQL `CHECK` requires exactly one, the same mechanism `PaymentIntent` got
+  in issue #85) and `facilityId` becomes a real FK to `FacilityProfile`. All three
+  are `RESTRICT`, so deleting an order or a facility account cannot erase the
+  fulfillment trail (ADR 0010). Splitting into `PrescriptionFulfillment` /
+  `LabOrderFulfillment` was weighed and rejected: it would give ARCHITECTURE.md
+  §5.3 step 5 two implementations to keep in sync and a facility's assigned-orders
+  queue a cross-table union.
+  No endpoints, services or module code changes: the placeholder had no readers,
+  so this ships as schema + migration + docs. #14 creates the row, #15 owns the
+  `→ fulfilled` transition (the only path per hard rule 5), #16 attaches
+  `LabResult` through its existing table. Two things the ADR decides rather than
+  invents: one fulfillment row per order, ever — re-routing after a `rejected`
+  fulfillment needs a partial unique index and stays deferred; and `facilityId` is
+  denormalised from the order at creation, the equality invariant owned by #14's
+  service, not a DB trigger.
+- 2026-10-22 — Phase 5: admin-only facility account creation + `FacilityCapability` matching
+  ([issue #14](https://github.com/DocForum/docforum-core/issues/14)).
+  `POST /facilities` (admin-gated at the route, mirroring Phase 1's admin-gated
+  doctor verification) creates the `facility`-role `User`, its `FacilityProfile`
+  and its `FacilityCapability` rows in one transaction, plus a
+  `facility.created` `AuditEvent` (ids and counts only — never the email or the
+  credential). There is still no self-serve facility signup: `POST /auth/signup`
+  refuses the role, so this endpoint is the only creation path (PRD OQ-2 — a
+  curated partner list is what protects FR-13 / §8.1.6). Deliberate defaults,
+  flagged rather than hidden: the admin sets the initial password out of band
+  (same posture as the bootstrap admin CLI) and `emailVerifiedAt` is set at
+  creation because the email provider (#17) can't deliver a link, and an
+  unverified curated partner would otherwise never be able to publish prices
+  (`requireVerifiedEmail` gates `POST /facilities/me/prices`). Capabilities must
+  match the facility type (`lab` ↔ `lab_test`, `pharmacy` ↔
+  `medication_dispense`) and at least one is required, so an account created
+  through this path can never be un-qualifiable data. Capability management
+  after creation (edit/retire a capability) has no endpoint yet — that surface
+  is still pending.
+  Matching (PRD FR-13): `GET /facilities/eligible` now returns only facilities
+  of the requested type that *hold* the matching `FacilityCapability` row, and
+  the services export `listEligibleFacilitiesForOrderKind('lab_order' |
+  'prescription')` for callers that start from an order instead of a facility
+  type. **Fail closed** — a facility with no capability rows, or only rows of
+  the wrong capability type, shows for nothing; under-showing is an operator
+  fix, over-showing is the fraud/safety concern §8.1.6 names. Consequence for
+  existing data: Phase-1 facilities seeded without capabilities disappear from
+  `/eligible` until an admin creates/repairs their qualification data — the
+  integration tests that predate #14 needed capability rows added to their
+  fixtures for exactly this reason.
+  Not in this issue, stated plainly because ADR 0012 assigns it to #14: the
+  `FulfillmentRecord` row *at facility selection* is not created here — no
+  selection endpoint exists yet (orders name their facility at issuance,
+  `Prescription.facilityProfileId` / `LabOrder.facilityProfileId`), and issuance
+  currently does not capability-check it. That wiring, and the
+  `→ fulfilled` transition, land with #15 on top of this matching rule.
+  No schema or migration changes: `FacilityProfile`, `FacilityCapability` and
+  `FulfillmentRecord` were already modeled (Phase 1 / #13) and the relations
+  proved sufficient. Tests:
+  `backend/tests/integration/facility-creation-matching.test.mts` (admin gate
+  enforced server-side at 401/403, no self-serve path, one-transaction creation
+  + audit, fail-closed matching across four facilities with different
+  capability data).
+- 2026-10-22 — Phase 3: referral expiry job
+  ([issue #8](https://github.com/DocForum/docforum-core/issues/8)). One interval
+  sweep (`src/jobs/referral-expiry.ts`, started from `server.ts` like the other
+  jobs — no queue) moves `pending` referrals untouched for
+  `REFERRAL_PENDING_TTL_DAYS` (default 14; sweep every
+  `REFERRAL_EXPIRY_SWEEP_INTERVAL_SECONDS`, default 3600) to the terminal
+  `expired` state through one conditional UPDATE in the referrals module, so it
+  is safe across processes and re-runs, and a concurrent patient accept/decline
+  either wins or finds the referral expired — never both. The age clock is
+  `updatedAt`, so a referral the cascade (#67) or an admin (#68) returned to
+  `pending` gets a fresh window. `accepted` referrals are never swept.
+  Schema: new `Referral.expiredAt` and `Referral.expiredReason`
+  (`ttl` | `no_show`), migration `20261022090000_referral_expiry`, which also
+  backfills existing `expired` rows as `no_show` (the only way to expire until
+  now) and adds a `(status, updatedAt)` index. `expired` stays distinct from
+  `declined` and `cancelled`; `expiredReason` tells the two ways into `expired`
+  apart, and the no-show cascade now records `no_show`. The TTL sweep also sets
+  `referringDoctorNotifiedAt`, the existing seam Phase 6 reads.
+  Not built: flagging the *patient* — there is no notification layer until
+  Phase 6. When it lands, it can select `status = 'expired' AND expiredReason =
+  'ttl'`; no marker for "patient notified" exists yet.
+- 2026-10-22 — Fixed env-mode platform signing (`PLATFORM_SIGNER_MODE=env`), which couldn't sign any payment transaction after the signer abstraction (#175). `EnvPlatformSigner` wrapped a bare `Keypair`, which has no `signTransaction`, and both signer adapters returned a string where stellar-sdk reads `{ signedTxXdr }`. Env signers are now built with stellar-sdk's `basicNodeSigner`, and `PlatformSigner` returns the SEP-43 shapes (the remote adapter included). New unit tests sign a real transaction and auth entry with a real keypair. Found by the first nightly testnet payments run.
+- 2026-10-23 — Phase 8: admin operations overview
+  ([issue #123](https://github.com/DocForum/docforum-core/issues/123)).
+  `GET /admin/overview` (admin-only) returns the count and oldest-item age for
+  each queue listed in `src/admin-overview-sections.ts`, with a drill-down path.
+  Each section comes from its owning module's service. A failing section is
+  reported as `unavailable` and does not fail the response. The result is cached
+  for 60 seconds. Only the doctor-verification queue is listed so far. Payments
+  in intermediate states, failed jobs, stale referrals and unrouted orders still
+  need their own sections.
+- 2026-10-23 — Phase 5: webhook security primitives for facility notifications
+  ([issue #126](https://github.com/DocForum/docforum-core/issues/126), partial).
+  `src/utils/webhook-security.ts` adds HTTPS-only URL validation, blocks
+  private, loopback, link-local and metadata IP literals, signs payloads with
+  HMAC-SHA256 over `timestamp.body`, and computes capped exponential retry
+  delays. Registration, the outbox, the delivery log and the schema are not
+  included yet.
+- 2026-10-23 — Publish @docforum/api-client as a versioned, generated TypeScript package derived from the OpenAPI spec. Removes hand-mirrored backend shapes in docforum-web, turns contract changes into compile errors, and publishes via GitHub Release tarball (same mechanism as @docforum/escrow-sdk). Generated types are never hand-edited; client has no Node-only dependencies.
+- 2026-10-23 — Phase 6: real-time notification stream over Server-Sent Events
+  ([issue #97](https://github.com/DocForum/docforum-core/issues/97), partial).
+  `GET /notifications/stream` (authenticated) sends a `retry` hint, a heartbeat
+  every 15 seconds, and a `token-expired` event before the access token expires,
+  then closes. Each user is capped at five open streams (429 beyond that). An
+  in-process hub fans out events to the user's streams. Persisted replay via
+  `Last-Event-ID` and cross-instance delivery through Postgres LISTEN/NOTIFY are
+  not included. They need the `Notification.userId` schema field.
+- 2026-10-24 — Phase 4: a doctor issues a prescription or lab order from a consultation
+  ([issue #10](https://github.com/DocForum/docforum-core/issues/10)).
+  `POST /orders/consultations/:consultationId/{prescriptions,lab-orders}` now
+  also refuse consultations whose appointment isn't `completed` (409, via the
+  new `consultationsService.assertConsultationAcceptsOrders`, checked after the
+  treating-doctor check) and check the facility up front
+  (`facilitiesService.requireFacilityForOrderKind`: unknown or wrong-type
+  facility → 400 instead of a foreign-key 500). Both still write through the
+  append-only issuance path from #9. New HTTP integration suite
+  `backend/tests/integration/orders-issuance.test.mts` (embedded Postgres, port
+  5467) covers both order types, corrections, treating-doctor-only access and
+  invalid consultation states. No schema or migration changes.
+- 2026-10-24 — Updated backend production dependencies to clear new high-severity advisories that failed the CI audit gate: `@stellar/stellar-sdk` 16.3.1 → 16.4.1 (pulls axios 1.18.0 → 1.20.0, which fixes the prototype-pollution, header-injection, ReDoS and SSRF advisories), `zod` 4.6.5 → 4.6.7 (GHSA-mrhx-c7xc-m3w5), `body-parser` 2.3.0 → 2.4.0, and `fast-uri` 3.1.8 → 3.1.9. All are within the existing semver ranges.
+- 2026-10-27 — Phase 9: add cached readiness checks for configuration, Postgres, Prisma
+  migrations and optional Stellar RPC health, plus liveness endpoints and
+  graceful HTTP/job/database shutdown ([issue #104](https://github.com/DocForum/docforum-core/issues/104)).
+- 2026-10-27 — Phase 9: JWT key rotation with key ids
+  ([issue #106](https://github.com/DocForum/docforum-core/issues/106)).
+  Access and refresh tokens are signed with the current key and carry its
+  `kid`. Verification accepts a previous key during an overlap window
+  (`JWT_*_SECRET_PREVIOUS`), so rotation does not log users out. Tokens with an
+  unknown `kid` are rejected. The rotation procedure is in
+  `docs/runbooks/secret-rotation.md`. Loading secrets from a secrets manager and
+  the staging rotation are still open.
+- 2026-10-27 — Phase 9: add typed test data factories for Phase 1 and payment models, an
+  idempotent synthetic preview seed, and a booking test fixture using the
+  factories ([issue #118](https://github.com/DocForum/docforum-core/issues/118)).
+- 2026-10-27 — Phase 8: DB-backed feature flags for staged rollouts
+  ([issue #132](https://github.com/DocForum/docforum-core/issues/132)). New
+  `FeatureFlag` table and `modules/flags`: boolean flags with an optional
+  percentage rollout, targeted by role or user-id allowlist. The percentage is a
+  sticky `sha256(flagKey:userId)` bucket, so a user gets the same answer on every
+  request and raising the percentage never switches anyone off. Evaluation never
+  throws and defaults to off (unknown flag, bad row, database down with nothing
+  cached); flags are cached in memory for `FEATURE_FLAG_CACHE_TTL_SECONDS`
+  (default 15).
+  `GET /admin/feature-flags` lists them, `PATCH /admin/feature-flags/:key`
+  creates/changes one and records a `feature_flag.created` / `feature_flag.updated`
+  `AuditEvent` in the same transaction (the percentage and counts only, never the
+  allowlisted user ids), and `GET /me/flags` returns the caller's evaluated flags
+  for the frontend. First user: wallet funding (`payments.wallet_funding`, seeded
+  **off**) now gates `POST /payments/intents/:id/prepare` with `403
+  FEATURE_DISABLED` — an admin has to enable it, so existing environments stop
+  offering it until they do. Migration `20261022100000_feature_flags`. "Per
+  environment" is by construction: each environment has its own database and so
+  its own flag rows.
+- 2026-10-27 — Phase 5.5: Validate Stellar public keys with checksum-accurate StrKey validation ([issue #26](https://github.com/DocForum/docforum-core/issues/26)).
+  Replaces the basic regex shape gate in `backend/src/modules/payments/validation.ts` with `StrKey.isValidEd25519PublicKey` from `@stellar/stellar-sdk`, ensuring invalid CRC16 checksums, malformed prefixes, non-base32 characters, and incorrect lengths are rejected at input validation time while preserving helpful validation error messages. Comprehensive unit test suite added in `backend/tests/unit/stellar-validation.test.mts`.
+- 2026-10-27 — Phase 1: verify Docker Compose local dev setup ([issue #27](https://github.com/DocForum/docforum-core/issues/27)).
+  Verified and updated `infra/docker/docker-compose.yml` (Postgres 16 + containerized backend) and `backend/Dockerfile` (ensuring Prisma client generation in container). Added missing startup environment variables (`SEP10_*`, `FIELD_ENCRYPTION_*`) and defaults in `backend/.env.example`. Tested clean execution (`docker compose up --build`), migration deployment, and endpoint functionality (`/health`, `/specialties`, auth endpoints). Updated `infra/docker/README.md` and root `README.md` with verified commands.
+- 2026-10-27 — Phase 9: rebuild docs site on upstream changes ([issue #29](https://github.com/DocForum/docforum-core/issues/29)).
+  Configured `.github/workflows/deploy-docs.yml` to accept `repository_dispatch` events (`upstream-docs-updated`, `docs-sync`) so docs changes landing in `docforum-web` or `docforum-escrow` can trigger automatic rebuilds of the cross-repo VitePress docs site. Removed the known-gap notes from `deploy-docs.yml` and `docs/site/README.md`, and documented the minimum-scope GitHub Personal Access Token (PAT) / GitHub App token requirements along with an example dispatch sender workflow for sibling repositories.
